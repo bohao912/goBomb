@@ -14,21 +14,24 @@ import (
 
 // 顏色
 var (
-	cyan   = lipgloss.NewStyle().Foreground(lipgloss.Color("#00FFFF"))
-	green  = lipgloss.NewStyle().Foreground(lipgloss.Color("#32CD32"))
-	gold   = lipgloss.NewStyle().Foreground(lipgloss.Color("#B8860B"))
-	red    = lipgloss.NewStyle().Foreground(lipgloss.Color("#FF0000"))
-	orange = lipgloss.NewStyle().Foreground(lipgloss.Color("#FF6347"))
+	gray     = lipgloss.NewStyle().Foreground(lipgloss.Color("#696969"))
+	green    = lipgloss.NewStyle().Foreground(lipgloss.Color("#32CD32"))
+	darkgold = lipgloss.NewStyle().Foreground(lipgloss.Color("#B8860B"))
+	gold     = lipgloss.NewStyle().Foreground(lipgloss.Color("#FFD700"))
+	red      = lipgloss.NewStyle().Foreground(lipgloss.Color("#FF0000"))
+	orange   = lipgloss.NewStyle().Foreground(lipgloss.Color("#FF6347"))
+	gameVar  game
 )
-var gameVar game
 
 type game struct {
-	start     time.Time // 紀錄遊玩時長
+	startTime time.Time // 紀錄遊玩時長
+	start     bool      // 遊戲是否開始
+	level     string    // 記錄難度
 	intSize   int       // 元素個數,理應等於 l*l
 	l         int       // 單行/列的元素個數
 	bomb      int       // 炸彈總數
-	gameMsg   string    // 遊戲結束的訊息
-	gameBoard []string  // 遊戲真正的版面
+	msg       string    // 遊戲結束的訊息
+	board     []string  // 遊戲真正的版面
 }
 
 // bubbletea使用的結構
@@ -38,6 +41,15 @@ type model struct {
 	selected  map[int]struct{} // which to-do items are selected
 }
 
+// 遊戲難度選單
+func initialMenu() model {
+	return model{
+		showBoard: []string{"S", "M", "L"},
+		selected:  make(map[int]struct{}),
+	}
+}
+
+// 遊戲板
 func initialModel() model {
 	return model{
 		showBoard: showBoardInit(),
@@ -47,6 +59,7 @@ func initialModel() model {
 func (m model) Init() tea.Cmd {
 	return nil
 }
+
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 
@@ -57,11 +70,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		// 指針移動
 		case "up":
-			if m.cursor-4 >= 0 {
+			if m.cursor-gameVar.l >= 0 {
 				m.cursor -= gameVar.l
 			}
 		case "down":
-			if m.cursor+4 <= len(m.showBoard) {
+			if m.cursor+gameVar.l < len(m.showBoard) {
 				m.cursor += gameVar.l
 			}
 		case "right":
@@ -74,22 +87,32 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		// click 點擊
 		case "enter":
-			if gameVar.gameBoard[m.cursor] == red.Render("M") {
-				gameVar.gameMsg = "踩到地雷了,遊戲結束\n"
-				return m, tea.Quit
-			} else if m.showBoard[m.cursor] == "*" || m.showBoard[m.cursor] == cyan.Render("0") {
-				checkBlank(m, m.cursor)
-			}
-			blankCount := 0
-			for i := 0; i < gameVar.intSize; i++ {
-				if m.showBoard[i] != "M" && m.showBoard[i] != "*" {
-					blankCount += 1
+			// 判別當前是"選單(false)"或是"遊戲(true)"
+			if gameVar.start {
+				if gameVar.board[m.cursor] == red.Render("M") {
+					gameVar.msg = "踩到地雷了,遊戲結束\n"
+					return m, tea.Quit
+				} else if m.showBoard[m.cursor] == "*" || m.showBoard[m.cursor] == gray.Render("0") {
+					checkBlank(m, m.cursor)
 				}
-			}
-			if blankCount == gameVar.intSize-gameVar.bomb {
-				gameVar.gameMsg = "找到所有炸彈了!\n"
+				// 統計未點開的數量
+				blankCount := 0
+				for i := 0; i < gameVar.intSize; i++ {
+					if m.showBoard[i] != "M" && m.showBoard[i] != "*" {
+						blankCount += 1
+					}
+				}
+				// 根據未點開的數量判別是否獲勝
+				if blankCount == gameVar.intSize-gameVar.bomb {
+					gameVar.msg = "找到所有炸彈了!\n"
+					return m, tea.Quit
+				}
+			} else {
+				// 難度選擇 S,M,L
+				gameVar.level = m.showBoard[m.cursor]
 				return m, tea.Quit
 			}
+
 		}
 	}
 	return m, nil
@@ -103,11 +126,15 @@ func (m model) View() string {
 		if m.cursor == i {
 			cursor = ">" // cursor!
 		}
-
 		// Render the row
-		if (i+1)%gameVar.l == 0 {
-			s += fmt.Sprintf("%s [%s]\n\n", cursor, choice)
+		// 判別當前是"選單(false)"或是"遊戲(true)"
+		if gameVar.start {
+			if (i+1)%gameVar.l == 0 {
+				s += fmt.Sprintf("%s%s\n", cursor, choice)
 
+			} else {
+				s += fmt.Sprintf("%s%s", cursor, choice)
+			}
 		} else {
 			s += fmt.Sprintf("%s [%s] ", cursor, choice)
 		}
@@ -117,23 +144,32 @@ func (m model) View() string {
 }
 func main() {
 	fmt.Println("S : 3 x 3 , 共 2 顆地雷\nM : 8 x 8 , 共 10 顆地雷\nL : 15 x 15 , 共 40 顆地雷 \n請選擇遊戲板大小:")
-	gameBoardInit()
-	gameVar.start = time.Now()
-	p := tea.NewProgram(initialModel())
-	if err := p.Start(); err != nil {
-		fmt.Printf("Alas, there's been an error: %v", err)
+	menu := tea.NewProgram(initialMenu())
+	if err := menu.Start(); err != nil {
+		fmt.Printf("初始化menu失敗 : %v", err)
 		os.Exit(1)
 	}
-	if gameVar.gameMsg != "" {
-		s := ""
+	gameBoardInit()
+	if !gameVar.start {
+		fmt.Println("未選擇遊戲難度,遊戲結束")
+		return
+	}
+	gameVar.startTime = time.Now()
+	game := tea.NewProgram(initialModel())
+	if err := game.Start(); err != nil {
+		fmt.Printf("初始化遊戲板失敗 : %v", err)
+		os.Exit(1)
+	}
+	if gameVar.msg != "" {
+		s := " "
 		for i := 0; i < gameVar.intSize; i++ {
 			if (i+1)%gameVar.l == 0 {
-				s += fmt.Sprintf(" [%s]\n", gameVar.gameBoard[i])
+				s += fmt.Sprintf("%s\n ", gameVar.board[i])
 			} else {
-				s += fmt.Sprintf(" [%s] ", gameVar.gameBoard[i])
+				s += fmt.Sprintf("%s ", gameVar.board[i])
 			}
 		}
-		fmt.Printf("%v%v耗時 : %v\n", gameVar.gameMsg, s, time.Since(gameVar.start))
+		fmt.Printf("%v%v耗時 : %v\n", gameVar.msg, s, time.Since(gameVar.startTime))
 	}
 }
 func showBoardInit() []string {
@@ -146,9 +182,8 @@ func showBoardInit() []string {
 
 // 初始化遊戲板
 func gameBoardInit() {
-	strSize := ""
-	fmt.Scanln(&strSize)
-	switch strSize {
+	// 根據難度設定參數
+	switch gameVar.level {
 	case "S":
 		gameVar.intSize = 9
 		gameVar.l = 3
@@ -162,12 +197,11 @@ func gameBoardInit() {
 		gameVar.l = 15
 		gameVar.bomb = 40
 	default:
-		fmt.Println("請輸入S,M,L其中一個大小")
-		gameBoardInit()
+		gameVar.start = false
 		return
 	}
 	// 隨機產生炸彈的所在位置 => 隨機取不重複的數字bomb個
-	bombLocationSlice := make([]int, 0)
+	var bombLocationSlice []int
 	rand.Seed(time.Now().UnixNano())
 	for len(bombLocationSlice) < gameVar.bomb {
 		bombLocation := rand.Intn(gameVar.intSize)
@@ -184,29 +218,27 @@ func gameBoardInit() {
 	}
 	sort.Ints(bombLocationSlice)
 	// 遊戲真正的版面
-	gameVar.gameBoard = make([]string, gameVar.intSize)
+	gameVar.board = make([]string, gameVar.intSize)
 	for i := 0; i < gameVar.intSize; i++ {
 		// M代表炸彈,B代表空白
-		if len(bombLocationSlice) > 0 {
-			if i == bombLocationSlice[0] {
-				gameVar.gameBoard[i] = "M"
-				bombLocationSlice = append(bombLocationSlice[:0], bombLocationSlice[1:]...)
-			} else {
-				gameVar.gameBoard[i] = "B"
-			}
-		} else {
-			gameVar.gameBoard[i] = "B"
+		gameVar.board[i] = "B"
+		if len(bombLocationSlice) > 0 && i == bombLocationSlice[0] {
+			gameVar.board[i] = "M"
+			bombLocationSlice = append(bombLocationSlice[:0], bombLocationSlice[1:]...)
 		}
 	}
 	// 遍尋版面將旁邊有炸彈區塊填上數字
 	// 每個區塊要檢查八個位子
 	for i := 0; i < gameVar.intSize; i++ {
-		l := gameVar.l
-		q := i / l
-		r := i % l
-		bombCount := 0
-		if gameVar.gameBoard[i] == "M" {
-			gameVar.gameBoard[i] = red.Render(gameVar.gameBoard[i])
+		var (
+			l         = gameVar.l
+			q         = i / l
+			r         = i % l
+			bombCount = 0
+		)
+		// 本身是炸彈就不檢查
+		if gameVar.board[i] == "M" {
+			gameVar.board[i] = red.Render(gameVar.board[i])
 			continue
 		}
 		if (i-l-1)/l == q-1 && (i-l-1)%l == r-1 {
@@ -233,18 +265,21 @@ func gameBoardInit() {
 		if (i+l+1)/l == q+1 && (i+l+1)%l == r+1 {
 			bombCount += checkBomb(i + l + 1)
 		}
-		gameVar.gameBoard[i] = strconv.Itoa(bombCount)
+		// 填數字
+		gameVar.board[i] = strconv.Itoa(bombCount)
+		// 根據數字給予顏色
 		switch bombCount {
 		case 0:
-			gameVar.gameBoard[i] = cyan.Render(gameVar.gameBoard[i])
+			gameVar.board[i] = gray.Render(gameVar.board[i])
 		case 1:
-			gameVar.gameBoard[i] = green.Render(gameVar.gameBoard[i])
+			gameVar.board[i] = green.Render(gameVar.board[i])
 		case 2:
-			gameVar.gameBoard[i] = gold.Render(gameVar.gameBoard[i])
+			gameVar.board[i] = darkgold.Render(gameVar.board[i])
 		default:
-			gameVar.gameBoard[i] = orange.Render(gameVar.gameBoard[i])
+			gameVar.board[i] = orange.Render(gameVar.board[i])
 		}
 	}
+	gameVar.start = true
 }
 
 // 用於計算遊戲板每一格的周圍有多少炸彈
@@ -253,7 +288,7 @@ func checkBomb(i int) int {
 		return 0
 	} else if i >= gameVar.intSize {
 		return 0
-	} else if gameVar.gameBoard[i] == "M" || gameVar.gameBoard[i] == red.Render("M") {
+	} else if gameVar.board[i] == "M" || gameVar.board[i] == red.Render("M") {
 		return 1
 	} else {
 		return 0
@@ -266,24 +301,26 @@ func checkBlank(m model, i int) {
 		return
 	} else if i >= gameVar.intSize {
 		return
-	} else if gameVar.gameBoard[i] == red.Render("M") {
+	} else if gameVar.board[i] == red.Render("M") {
 		return
 	} else if m.showBoard[i] != "*" {
 		return
-	} else if gameVar.gameBoard[i] == cyan.Render("0") {
-		m.showBoard[i] = gameVar.gameBoard[i]
+	} else if gameVar.board[i] == gray.Render("0") {
+		m.showBoard[i] = gameVar.board[i]
 		findBlank(m, i)
 		return
 	} else {
-		m.showBoard[i] = gameVar.gameBoard[i]
+		m.showBoard[i] = gameVar.board[i]
 		return
 	}
 }
 
 func findBlank(m model, i int) {
-	l := gameVar.l
-	q := i / l
-	r := i % l
+	var (
+		l = gameVar.l
+		q = i / l
+		r = i % l
+	)
 	if (i-l-1)/l == q-1 && (i-l-1)%l == r-1 {
 		checkBlank(m, i-l-1)
 	}
